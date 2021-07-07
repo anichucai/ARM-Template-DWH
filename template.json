@@ -1,0 +1,516 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "logicAppName": {
+      "type": "string",
+      "defaultValue": "[concat('logicapp', uniqueString(resourceGroup().id))]",
+      "metadata": {
+        "description": "The name of the logic app that you wish to create."
+      }
+    },
+    "projectDevOps": {
+      "type": "string",
+      "defaultValue": "azure-net-framework",
+      "metadata": {
+        "description": "The name of the Azure DevOps project you wish to track."
+      }
+    },
+    "organizationDevOps": {
+      "type": "string",
+      "defaultValue": "AnaMC",
+      "metadata": {
+        "description": "The name of the Azure DevOps organization you wish to track."
+      }
+    },
+    "logicAppInterval": {
+      "type": "int",
+      "defaultValue": 60,
+      "metadata": {
+        "description": "The interval of minutes in which the logic app will be triggered."
+      }
+    },
+    "appName": {
+      "type": "string",
+      "defaultValue": "[concat('fnapp', uniqueString(resourceGroup().id))]",
+      "metadata": {
+        "description": "The name of the function app that you wish to create."
+      }
+    },
+    "fuctionInterval": {
+      "type": "string",
+      "defaultValue": "3",
+      "metadata": {
+        "description": "The interval in hours in which the functions will be triggered."
+      }
+    },
+    "functionWorkItemUpdater": {
+      "type": "string",
+      "defaultValue": "functionWorkItemUpdater",
+      "metadata": {
+        "description": "The name of the function app that will update work items from Azure DevOps and generate a file."
+      }
+    },
+    "functionFieldsUpdater": {
+      "type": "string",
+      "defaultValue": "functionFieldsUpdater",
+      "metadata": {
+        "description": "The name of the function app that will read a file and update fields from Azure DevOps."
+      }
+    },
+    "storageAccountName": {
+      "type": "string",
+      "defaultValue": "[concat('storgae', uniqueString(resourceGroup().id))]",
+      "metadata": {
+        "description": "The name of the storage account where you wish to create the function app."
+      }
+    },
+    "storageAccountType": {
+      "type": "string",
+      "defaultValue": "Standard_LRS",
+      "allowedValues": [
+        "Standard_LRS",
+        "Standard_GRS",
+        "Standard_RAGRS"
+      ],
+      "metadata": {
+        "description": "Storage Account type"
+      }
+    },
+    "queueNameForFieldsUpdate": {
+        "defaultValue": "queue-out-fields",
+        "minLength": 3,
+        "maxLength": 63,
+        "type": "String",
+        "metadata": {
+            "description": "The name of the queue where the results of Azure DevOps the fields' updates will be tracked. This name may only contain lowercase letters, numbers and non-consecutive hyphens."
+        }
+    },
+    "queueNameForQueueWorkItemUpdate": {
+        "defaultValue": "queue-out-wi",
+        "minLength": 3,
+        "maxLength": 63,
+        "type": "String",
+        "metadata": {
+            "description": "The name of the queue where the results of the Azure DevOps work items' updates will be tracked. This name may only contain lowercase letters, numbers and non-consecutive hyphens."
+        }
+    },
+    "queueNameForQueueWorkItemURL": {
+        "defaultValue": "queue-in-wi",
+        "minLength": 3,
+        "maxLength": 63,
+        "type": "String",
+        "metadata": {
+            "description": "The name of the queue where the url of the updated work items will be stored. This name may only contain lowercase letters, numbers and non-consecutive hyphens."
+        }
+    },
+    "azureDevOpsAccount": {
+        "defaultValue": "anac@epidataconsulting.com",
+        "minLength": 3,
+        "maxLength": 63,
+        "type": "String",
+        "metadata": {
+            "description": "Mail of the Azure DevOps Account that will be used to access the organizarion."
+        }
+    }
+
+  },
+  "variables": {
+    "location": "[resourceGroup().location]",
+    "locationCode": "[toLower(replace(variables('location'), ' ', ''))]",
+    "appInsightsLocation": "[resourceGroup().location]",
+    "functionAppName": "[parameters('appName')]",
+    "hostingPlanName": "[parameters('appName')]",
+    "applicationInsightsName": "[parameters('appName')]",
+    "functionWorkerRuntime": "dotnet",
+    "connectionQueue": "azurequeues",
+    "connectionDevOps": "visualstudioteamservices",
+    "storageAccountId": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+    "singleQuote": "'"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2019-06-01",
+      "name": "[parameters('storageAccountName')]",
+      "location": "[variables('location')]",
+      "sku": {
+        "name": "[parameters('storageAccountType')]"
+      },
+      "kind": "Storage"
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2020-06-01",
+      "name": "[variables('hostingPlanName')]",
+      "location": "[variables('location')]",
+      "sku": {
+        "name": "Y1",
+        "tier": "Dynamic"
+      },
+      "properties": {
+        "name": "[variables('hostingPlanName')]",
+        "computeMode": "Dynamic"
+      }
+    },
+    
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2020-06-01",
+      "name": "[variables('functionAppName')]",
+      "location": "[variables('location')]",
+      "kind": "functionapp",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]",
+        "siteConfig": {
+          "appSettings": [
+            {
+              "name": "AzureWebJobsStorage",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', parameters('storageAccountName'), ';EndpointSuffix=', environment().suffixes.storage, ';AccountKey=',listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2019-06-01').keys[0].value)]"
+            },
+            {
+              "name": "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', parameters('storageAccountName'), ';EndpointSuffix=', environment().suffixes.storage, ';AccountKey=',listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2019-06-01').keys[0].value)]"
+            },
+            {
+              "name": "WEBSITE_CONTENTSHARE",
+              "value": "[toLower(variables('functionAppName'))]"
+            },
+            {
+              "name": "FUNCTIONS_EXTENSION_VERSION",
+              "value": "~2"
+            },
+            {
+              "name": "WEBSITE_NODE_DEFAULT_VERSION",
+              "value": "~10"
+            },
+            {
+              "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
+              "value": "[reference(resourceId('microsoft.insights/components', variables('applicationInsightsName')), '2020-02-02-preview').InstrumentationKey]"
+            },
+            {
+              "name": "FUNCTIONS_WORKER_RUNTIME",
+              "value": "[variables('functionWorkerRuntime')]"
+            }
+          ]
+        }
+      }
+    },
+    {
+    "type": "Microsoft.Web/sites/config",
+    "apiVersion": "2018-11-01",
+    "name": "[concat(parameters('appName'), '/web')]",
+    "location": "[variables('location')]",
+    "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('appName'))]"
+    ],
+    "properties": {
+        "numberOfWorkers": 1,
+        "defaultDocuments": [
+            "Default.htm",
+            "Default.html",
+            "Default.asp",
+            "index.htm",
+            "index.html",
+            "iisstart.htm",
+            "default.aspx",
+            "index.php"
+        ],
+        "netFrameworkVersion": "v4.0",
+        "phpVersion": "5.6",
+        "requestTracingEnabled": false,
+        "remoteDebuggingEnabled": false,
+        "httpLoggingEnabled": false,
+        "logsDirectorySizeLimit": 35,
+        "detailedErrorLoggingEnabled": false,
+        "publishingUsername": "[concat('$', parameters('appName'))]",
+        "azureStorageAccounts": {},
+        "scmType": "None",
+        "use32BitWorkerProcess": true,
+        "webSocketsEnabled": false,
+        "alwaysOn": false,
+        "managedPipelineMode": "Integrated",
+        "virtualApplications": [
+            {
+                "virtualPath": "/",
+                "physicalPath": "site\\wwwroot",
+                "preloadEnabled": false
+            }
+        ],
+        "loadBalancing": "LeastRequests",
+        "experiments": {
+            "rampUpRules": []
+        },
+        "autoHealEnabled": false,
+        "localMySqlEnabled": false,
+        "ipSecurityRestrictions": [
+            {
+                "ipAddress": "Any",
+                "action": "Allow",
+                "priority": 1,
+                "name": "Allow all",
+                "description": "Allow all access"
+            }
+        ],
+        "scmIpSecurityRestrictions": [
+            {
+                "ipAddress": "Any",
+                "action": "Allow",
+                "priority": 1,
+                "name": "Allow all",
+                "description": "Allow all access"
+            }
+        ],
+        "scmIpSecurityRestrictionsUseMain": false,
+        "http20Enabled": false,
+        "minTlsVersion": "1.2",
+        "ftpsState": "AllAllowed",
+        "reservedInstanceCount": 0
+    }
+},
+    {
+      "type": "microsoft.insights/components",
+      "apiVersion": "2020-02-02-preview",
+      "name": "[variables('applicationInsightsName')]",
+      "location": "[variables('appInsightsLocation')]",
+      "tags": {
+        "[concat('hidden-link:', resourceId('Microsoft.Web/sites', variables('applicationInsightsName')))]": "Resource"
+      },
+      "properties": {
+        "ApplicationId": "[variables('applicationInsightsName')]",
+        "Request_Source": "IbizaWebAppExtensionCreate"
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/queueServices",
+      "apiVersion": "2021-04-01",
+      "name": "[concat(parameters('storageAccountName'), '/default')]",
+      "dependsOn": [
+          "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ],
+      "properties": {
+          "cors": {
+              "corsRules": []
+          }
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/queueServices/queues",
+      "apiVersion": "2021-04-01",
+      "name": "[concat(parameters('storageAccountName'), concat('/default/', parameters('queueNameForQueueWorkItemUpdate')))]",
+      "dependsOn": [
+          "[resourceId('Microsoft.Storage/storageAccounts/queueServices', parameters('storageAccountName'), 'default')]",
+          "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ],
+      "properties": {
+          "metadata": {}
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/queueServices/queues",
+      "apiVersion": "2021-04-01",
+      "name": "[concat(parameters('storageAccountName'), concat('/default/', parameters('queueNameForFieldsUpdate')))]",
+      "dependsOn": [
+          "[resourceId('Microsoft.Storage/storageAccounts/queueServices', parameters('storageAccountName'), 'default')]",
+          "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ],
+      "properties": {
+          "metadata": {}
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/queueServices/queues",
+      "apiVersion": "2021-04-01",
+      "name": "[concat(parameters('storageAccountName'), concat('/default/', parameters('queueNameForQueueWorkItemURL')))]",
+      "dependsOn": [
+          "[resourceId('Microsoft.Storage/storageAccounts/queueServices', parameters('storageAccountName'), 'default')]",
+          "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ],
+      "properties": {
+          "metadata": {}
+      }
+    },
+    {
+      "type": "Microsoft.Web/connections",
+      "apiVersion": "2018-07-01-preview",
+      "name": "[variables('connectionQueue')]",
+      "location": "[variables('locationCode')]",
+      "dependsOn": [
+          "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ],
+      "properties": {
+        "displayName": "[variables('connectionQueue')]",
+        "parameterValues": {
+          "storageaccount": "[parameters('storageAccountName')]",
+          "sharedkey": "[listKeys(variables('storageAccountId'), '2019-04-01').keys[0].value]"
+        },
+        "api": {
+          "id": "[concat('/subscriptions/',subscription().subscriptionId,'/providers/Microsoft.Web/locations/', variables('locationCode'),'/managedApis/', variables('connectionQueue'))]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Web/connections",
+      "apiVersion": "2018-07-01-preview",
+      "name": "[variables('connectionDevOps')]",
+      "location": "[variables('locationCode')]",
+      "kind": "V1",
+      "properties": {
+        "displayName": "[parameters('azureDevOpsAccount')]",
+        "parameterValues": {
+          "token": true
+        },
+        "api": {
+          "id": "[concat('/subscriptions/',subscription().subscriptionId,'/providers/Microsoft.Web/locations/', variables('locationCode'),'/managedApis/', variables('connectionDevOps'))]"
+        }
+      }
+    },
+    {
+          "type": "Microsoft.Logic/workflows",
+          "apiVersion": "2017-07-01",
+          "name": "[parameters('logicAppName')]",
+          "location": "[variables('locationCode')]",
+          "dependsOn": [
+              "[resourceId('Microsoft.Web/connections', variables('connectionDevOps'))]",
+              "[resourceId('Microsoft.Web/connections', variables('connectionQueue'))]"
+          ],
+          "properties": {
+              "state": "Enabled",
+              "definition": {
+                  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                  "contentVersion": "1.0.0.0",
+                  "parameters": {
+                      "$connections": {
+                          "defaultValue": {},
+                          "type": "Object"
+                      }
+                  },
+                  "triggers": {
+                      "When_a_work_item_is_updated": {
+                          "recurrence": {
+                              "frequency": "Minute",
+                              "interval": "[parameters('logicAppInterval')]"
+                          },
+                          "splitOn": "@triggerBody()?['value']",
+                          "type": "ApiConnection",
+                          "inputs": {
+                              "host": {
+                                  "connection": {
+                                      "name": "@parameters('$connections')['visualstudioteamservices']['connectionId']"
+                                  }
+                              },
+                              "method": "get",
+                              "path": "[concat('/v2/workitemupdated_trigger/@{encodeURIComponent(', variables('singleQuote'), parameters('projectDevOps'), variables('singleQuote'), ')}/_apis/wit/wiql')]",
+                              "queries": {
+                                  "account": "[parameters('organizationDevOps')]"
+                              }
+                          }
+                      }
+                  },
+                  "actions": {
+                      "Put_a_message_on_a_queue_(V2)": {
+                          "runAfter": {},
+                          "type": "ApiConnection",
+                          "inputs": {
+                              "body": "@triggerBody()?['url']",
+                              "host": {
+                                  "connection": {
+                                      "name": "@parameters('$connections')['azurequeues']['connectionId']"
+                                  }
+                              },
+                              "method": "post",
+                              
+                              "path": "[concat('/v2/storageAccounts/@{encodeURIComponent(encodeURIComponent(', variables('singleQuote'), parameters('storageAccountName'), variables('singleQuote'), '))}/queues/@{encodeURIComponent(', variables('singleQuote'), parameters('queueNameForQueueWorkItemURL'), variables('singleQuote'), ')}/messages')]"
+                          }
+                      }
+                  },
+                  "outputs": {}
+              },
+              "parameters": {
+                  "$connections": {
+                      "value": {
+                          "azurequeues": {
+                              "connectionId": "[resourceId('Microsoft.Web/connections', variables('connectionQueue'))]",
+                              "connectionName": "azurequeues",
+                              "id": "[concat('/subscriptions/',subscription().subscriptionId,'/providers/Microsoft.Web/locations/', variables('locationCode'),'/managedApis/azurequeues')]"
+                          },
+                          "visualstudioteamservices": {
+                              "connectionId": "[resourceId('Microsoft.Web/connections', variables('connectionDevOps'))]",
+                              "connectionName": "visualstudioteamservices",
+                              "id": "[concat('/subscriptions/', subscription().subscriptionId,'/providers/Microsoft.Web/locations/', variables('locationCode'),'/managedApis/visualstudioteamservices')]"
+                          }
+                      }
+                  }
+              }
+          }
+      },
+      {
+        "type": "Microsoft.Web/sites/functions",
+        "apiVersion": "2018-11-01",
+        "name": "[concat(parameters('appName'), '/', parameters('functionFieldsUpdater'))]",
+        "location": "[variables('location')]",
+        "dependsOn": [
+            "[resourceId('Microsoft.Web/sites', parameters('appName'))]"
+        ],
+        "properties": {
+            "script_root_path_href": "[concat('https://', parameters('appName'), '.azurewebsites.net/admin/vfs/site/wwwroot/', parameters('functionFieldsUpdater'), '/')]",
+            "script_href": "[concat('https://', parameters('appName'), '.azurewebsites.net/admin/vfs/site/wwwroot/', parameters('functionFieldsUpdater'), '/run.csx')]",
+            "config_href": "[concat('https://', parameters('appName'), '.azurewebsites.net/admin/vfs/site/wwwroot/', parameters('functionFieldsUpdater'), '/function.json')]",
+            "href": "[concat('https://', parameters('appName'), '.azurewebsites.net/admin/functions/', parameters('functionFieldsUpdater'))]",
+            "config": {
+              "bindings": [
+              {
+                "name": "myTimer",
+                "type": "timerTrigger",
+                "direction": "in",
+                "schedule": "[concat('0 0 */', parameters('fuctionInterval'), ' * * *')]"
+              }
+              ]
+            }
+        }
+        },
+        {
+        "type": "Microsoft.Web/sites/functions",
+        "apiVersion": "2018-11-01",
+        "name": "[concat(parameters('appName'), '/', parameters('functionWorkItemUpdater'))]",
+        "location": "[variables('location')]",
+        "dependsOn": [
+            "[resourceId('Microsoft.Web/sites', parameters('appName'))]"
+        ],
+        "properties": {
+            "script_root_path_href": "[concat('https://', parameters('appName'), '.azurewebsites.net/admin/vfs/site/wwwroot/', parameters('functionWorkItemUpdater'), '/')]",
+            "script_href": "[concat('https://', parameters('appName'), '.azurewebsites.net/admin/vfs/site/wwwroot/', parameters('functionWorkItemUpdater'), '/run.csx')]",
+            "config_href": "[concat('https://', parameters('appName'), '.azurewebsites.net/admin/vfs/site/wwwroot/', parameters('functionWorkItemUpdater'), '/function.json')]",
+            "href": "[concat('https://', parameters('appName'), '.azurewebsites.net/admin/functions/', parameters('functionWorkItemUpdater'))]",
+            "config": {
+              "bindings": [
+              {
+                "name": "myTimer",
+                "type": "timerTrigger",
+                "direction": "in",
+                "schedule": "[concat('0 0 */', parameters('fuctionInterval'), ' * * *')]"
+              }
+              ]
+            }
+        }
+        },
+        {
+            "type": "Microsoft.Web/sites/hostNameBindings",
+            "apiVersion": "2018-11-01",
+            "name": "[concat(parameters('appName'), '/', parameters('appName'), '.azurewebsites.net')]",
+            "location": "[variables('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', parameters('appName'))]"
+            ],
+            "properties": {
+                "siteName": "[parameters('appName')]",
+                "hostNameType": "Verified"
+            }
+        }
+    
+  ]
+}
