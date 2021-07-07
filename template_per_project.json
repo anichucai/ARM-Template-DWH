@@ -49,24 +49,6 @@
         "description": "Storage Account type"
       }
     },
-    "queueNameForFieldsUpdate": {
-        "defaultValue": "queue-out-fields",
-        "minLength": 3,
-        "maxLength": 63,
-        "type": "String",
-        "metadata": {
-            "description": "The name of the queue where the results of Azure DevOps the fields' updates will be tracked. This name may only contain lowercase letters, numbers and non-consecutive hyphens."
-        }
-    },
-    "queueNameForQueueWorkItemUpdate": {
-        "defaultValue": "queue-out-wi",
-        "minLength": 3,
-        "maxLength": 63,
-        "type": "String",
-        "metadata": {
-            "description": "The name of the queue where the results of the Azure DevOps work items' updates will be tracked. This name may only contain lowercase letters, numbers and non-consecutive hyphens."
-        }
-    },
     "queueNameForQueueWorkItemURL": {
         "defaultValue": "queue-in-wi",
         "minLength": 3,
@@ -117,30 +99,6 @@
           "cors": {
               "corsRules": []
           }
-      }
-    },
-    {
-      "type": "Microsoft.Storage/storageAccounts/queueServices/queues",
-      "apiVersion": "2021-04-01",
-      "name": "[concat(parameters('storageAccountName'), concat('/default/', parameters('queueNameForQueueWorkItemUpdate')))]",
-      "dependsOn": [
-          "[resourceId('Microsoft.Storage/storageAccounts/queueServices', parameters('storageAccountName'), 'default')]",
-          "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
-      ],
-      "properties": {
-          "metadata": {}
-      }
-    },
-    {
-      "type": "Microsoft.Storage/storageAccounts/queueServices/queues",
-      "apiVersion": "2021-04-01",
-      "name": "[concat(parameters('storageAccountName'), concat('/default/', parameters('queueNameForFieldsUpdate')))]",
-      "dependsOn": [
-          "[resourceId('Microsoft.Storage/storageAccounts/queueServices', parameters('storageAccountName'), 'default')]",
-          "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
-      ],
-      "properties": {
-          "metadata": {}
       }
     },
     {
